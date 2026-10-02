@@ -1,0 +1,15 @@
+{
+  "name": "job-interview",
+  "version": "1.0.0",
+  "description": "초등 국어 직업 인터뷰 프로그램",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
