@@ -14,7 +14,8 @@ const MODEL_FEEDBACK = process.env.GEMINI_MODEL_FEEDBACK || MODEL_CHAT;
 // 선택: 답변이 너무 느릴 때 0으로 설정해 보세요. (일부 모델만 지원해요. 오류가 나면 이 설정을 지워 주세요.)
 const THINKING_BUDGET = process.env.GEMINI_THINKING_BUDGET;
 const RATE_LIMIT = Number(process.env.RATE_LIMIT) || 600; // IP 하나당 30분에 허용하는 요청 수
-const MAX_TRIES = 3; // 한도(429)나 서버 오류가 나면 자동으로 다시 시도하는 횟수
+// 기본 모델이 바쁘거나(503) 한도에 걸리면(429) 이 예비 모델이 자동으로 대신 대답해요.
+const MODEL_FALLBACK = process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-lite-latest';
 
 // ───────── 질문 구조 ─────────
 // 정해진 구조: 정보 3, 후속 1, 생각·느낌 1, 포부 1, 당부 1 = 질문 7번
@@ -30,7 +31,7 @@ const TOTAL = TYPES.reduce((s, t) => s + QUOTA[t], 0); // 7
 if (!API_KEY) {
   console.warn('⚠ GEMINI_API_KEY 환경변수가 없어요. Render의 Environment에서 설정해 주세요.');
 }
-console.log(`사용 모델: 대화=${MODEL_CHAT}, 피드백=${MODEL_FEEDBACK}`);
+console.log(`사용 모델: 대화=${MODEL_CHAT}, 피드백=${MODEL_FEEDBACK}, 예비=${MODEL_FALLBACK}`);
 
 // ───────── 간단한 요청 제한 ─────────
 const hits = new Map();
@@ -80,6 +81,8 @@ function extractText(data) {
   throw new Error(blocked ? 'blocked' : 'empty');
 }
 
+let lastModelUsed = '';
+
 async function callGemini({ model, system, messages, maxTokens }) {
   if (!API_KEY) throw new Error('no_key');
 
@@ -99,12 +102,23 @@ async function callGemini({ model, system, messages, maxTokens }) {
     })),
     generationConfig,
   });
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
-  let lastErr = new Error('api_error');
-  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-    if (attempt > 0) await sleep(attempt * 2000); // 2초, 4초 기다렸다가 다시 시도
+  // 시도 순서: 기본 모델 → 예비 모델 → 예비 모델(조금 기다렸다가 한 번 더)
+  const plan = [
+    { model, wait: 0 },
+    { model: MODEL_FALLBACK, wait: 1000 },
+    { model: MODEL_FALLBACK, wait: 3000 },
+  ];
+  const notFound = new Set();
+  let sawBusy = false;
+  let sawLimit = false;
+  let sawOther = false;
 
+  for (const step of plan) {
+    if (notFound.has(step.model)) continue;
+    if (step.wait) await sleep(step.wait);
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(step.model)}:generateContent`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
     let status = 0;
@@ -119,9 +133,9 @@ async function callGemini({ model, system, messages, maxTokens }) {
       status = res.status;
       rawText = await res.text();
     } catch (err) {
-      console.error('Gemini 연결 오류:', err.message);
-      lastGeminiError = '연결 오류: ' + err.message;
-      lastErr = new Error('api_error');
+      console.error(`Gemini 연결 오류 (${step.model}):`, err.message);
+      lastGeminiError = `연결 오류 (${step.model}): ${err.message}`;
+      sawOther = true;
       continue;
     } finally {
       clearTimeout(timer);
@@ -134,24 +148,33 @@ async function callGemini({ model, system, messages, maxTokens }) {
       } catch (e) {
         throw new Error('empty');
       }
+      lastModelUsed = step.model;
+      if (step.model !== model) console.log(`예비 모델(${step.model})이 대신 대답했어요. (기본 모델: ${model})`);
       return extractText(payload);
     }
 
-    console.error('Gemini API 오류', status, rawText.slice(0, 500));
-    lastGeminiError = `HTTP ${status}: ${googleMessage(rawText)}`;
-    if (status === 429) {
-      lastErr = new Error('rate_limited');
+    console.error(`Gemini API 오류 (${step.model})`, status, rawText.slice(0, 500));
+    lastGeminiError = `HTTP ${status} (${step.model}): ${googleMessage(rawText)}`;
+    if (status === 404) {
+      notFound.add(step.model);
       continue;
     }
     if (status >= 500) {
-      lastErr = new Error('api_error');
+      sawBusy = true;
       continue;
     }
-    if (status === 404) throw new Error('bad_model');
+    if (status === 429) {
+      sawLimit = true;
+      continue;
+    }
     if (status === 400 || status === 401 || status === 403) throw new Error('bad_key');
-    throw new Error('api_error');
+    sawOther = true;
   }
-  throw lastErr;
+
+  if (sawBusy) throw new Error('overloaded');
+  if (sawLimit) throw new Error('rate_limited');
+  if (notFound.size > 0 && !sawOther) throw new Error('bad_model');
+  throw new Error('api_error');
 }
 
 function errorMessage(err) {
@@ -160,6 +183,7 @@ function errorMessage(err) {
   if (m === 'bad_key') return '서버의 API 설정에 문제가 있어요. 선생님께 알려 주세요.';
   if (m === 'bad_model') return '서버의 모델 설정에 문제가 있어요. 선생님께 알려 주세요.';
   if (m === 'rate_limited') return '지금 쓰는 친구가 많아요. 잠시 후에 같은 질문을 다시 보내 주세요.';
+  if (m === 'overloaded') return 'AI가 지금 조금 바빠요. 잠시 후에 같은 질문을 다시 보내 주세요.';
   if (m === 'bad_json' || m === 'empty') return '답변을 만들지 못했어요. 같은 질문을 다시 해 보세요.';
   if (m === 'blocked') return '이 질문에는 대답하기 어려워요. 다른 질문을 해 보세요.';
   return '연결이 불안정해요. 잠시 후에 다시 해 보세요.';
@@ -450,6 +474,7 @@ app.get('/diag', async (req, res) => {
   out.push(`GEMINI_API_KEY: ${API_KEY ? '설정됨' : '없음 ← Render의 Environment에 추가해 주세요'}`);
   out.push(`대화 모델(GEMINI_MODEL): ${MODEL_CHAT}`);
   out.push(`피드백 모델: ${MODEL_FEEDBACK}`);
+  out.push(`예비 모델(GEMINI_FALLBACK_MODEL): ${MODEL_FALLBACK}`);
 
   if (API_KEY) {
     try {
@@ -466,6 +491,7 @@ app.get('/diag', async (req, res) => {
         out.push(
           `지금 설정한 모델이 목록에 ${names.includes(MODEL_CHAT) ? '보여요 (실제로 쓸 수 있는지는 맨 아래 테스트 호출로 확인해요)' : '없어요 ← 아래 목록에서 골라 GEMINI_MODEL을 바꿔 주세요'}`
         );
+        out.push(`예비 모델이 목록에 ${names.includes(MODEL_FALLBACK) ? '보여요' : '없어요 ← 아래 목록에서 골라 GEMINI_FALLBACK_MODEL을 넣어 주세요'}`);
         out.push('쓸 수 있는 모델: ' + (names.join(', ') || '(없음)'));
       } else {
         out.push(`키 확인: 실패 (HTTP ${r.status}) ${googleMessage(t)}`);
@@ -481,7 +507,7 @@ app.get('/diag', async (req, res) => {
         messages: [{ role: 'user', content: '{"ok":true} 라고만 답해.' }],
         maxTokens: 200,
       });
-      out.push('테스트 호출: 성공 → ' + text.slice(0, 80));
+      out.push(`테스트 호출: 성공 (대답한 모델: ${lastModelUsed}) → ` + text.slice(0, 80));
     } catch (e) {
       out.push(`테스트 호출: 실패 (${e.message})`);
       if (lastGeminiError) out.push('Google이 알려 준 내용: ' + lastGeminiError);
