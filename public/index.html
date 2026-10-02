@@ -67,6 +67,8 @@ button{font-family:inherit;cursor:pointer}
 .bubble{max-width:78%;padding:10px 16px;border:2px solid var(--ink);border-radius:16px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
 .msg.them .bubble{background:var(--mint-soft);border-bottom-left-radius:4px}
 .msg.me .bubble{background:var(--sun);border-bottom-right-radius:4px}
+.msg.guide{justify-content:center}
+.msg.guide .bubble{max-width:90%;background:#fff;border-style:dashed;font-size:16px;text-align:center}
 .typing{display:inline-flex;gap:6px;padding:14px 18px}
 .typing i{width:9px;height:9px;border-radius:50%;background:var(--ink);opacity:.35;animation:blink 1s infinite}
 .typing i:nth-child(2){animation-delay:.2s}
@@ -418,6 +420,12 @@ button{font-family:inherit;cursor:pointer}
       if (data.blocked) {
         $('blockMsg').textContent = data.message || '성적이거나 폭력적인 질문은 할 수 없어요. 면담이 끝났어요.';
         showScreen('screenBlocked');
+        return;
+      }
+      if (data.accepted === false) {
+        // 잘못된 질문: 횟수에 세지 않고 안내만 보여 줌
+        if (data.reply) addBubble('them', data.reply);
+        addBubble('guide', '💡 ' + data.message);
         return;
       }
       var type = (data.type in state.counts) ? data.type : 'other';
