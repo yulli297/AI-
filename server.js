@@ -8,8 +8,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ───────── 설정 (Render의 Environment에서 바꿀 수 있어요) ─────────
 const API_KEY = process.env.GEMINI_API_KEY;
-// 모델 이름은 자주 바뀌어요. Google AI Studio에서 무료로 쓸 수 있는 Flash 계열 이름을 확인해서 GEMINI_MODEL에 넣어 주세요.
-const MODEL_CHAT = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// 기본 모델은 gemini-3.8-flash예요. 다른 모델을 쓰고 싶을 때만 Render에 GEMINI_MODEL을 넣어 주세요. (넣으면 이 기본값보다 우선해요)
+const MODEL_CHAT = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const MODEL_FEEDBACK = process.env.GEMINI_MODEL_FEEDBACK || MODEL_CHAT;
 // 선택: 답변이 너무 느릴 때 0으로 설정해 보세요. (일부 모델만 지원해요. 오류가 나면 이 설정을 지워 주세요.)
 const THINKING_BUDGET = process.env.GEMINI_THINKING_BUDGET;
@@ -464,7 +464,7 @@ app.get('/diag', async (req, res) => {
           .map((m) => String(m.name).replace(/^models\//, ''));
         out.push('키 확인: 성공 (Google이 키를 인정했어요)');
         out.push(
-          `지금 설정한 모델이 목록에 ${names.includes(MODEL_CHAT) ? '있어요' : '없어요 ← 아래 목록에서 골라 GEMINI_MODEL을 바꿔 주세요'}`
+          `지금 설정한 모델이 목록에 ${names.includes(MODEL_CHAT) ? '보여요 (실제로 쓸 수 있는지는 맨 아래 테스트 호출로 확인해요)' : '없어요 ← 아래 목록에서 골라 GEMINI_MODEL을 바꿔 주세요'}`
         );
         out.push('쓸 수 있는 모델: ' + (names.join(', ') || '(없음)'));
       } else {
