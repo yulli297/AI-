@@ -8,14 +8,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ───────── 설정 (Render의 Environment에서 바꿀 수 있어요) ─────────
 const API_KEY = process.env.GEMINI_API_KEY;
-// 기본 모델은 gemini-3.8-flash예요. 다른 모델을 쓰고 싶을 때만 Render에 GEMINI_MODEL을 넣어 주세요. (넣으면 이 기본값보다 우선해요)
-const MODEL_CHAT = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+// 기본 모델은 gemini-3.5-flash-lite예요. (무료 한도: 분당 15번, 하루 500번)
+// 다른 모델을 쓰고 싶을 때만 Render에 GEMINI_MODEL을 넣어 주세요. (넣으면 이 기본값보다 우선해요)
+const MODEL_CHAT = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const MODEL_FEEDBACK = process.env.GEMINI_MODEL_FEEDBACK || MODEL_CHAT;
 // 선택: 답변이 너무 느릴 때 0으로 설정해 보세요. (일부 모델만 지원해요. 오류가 나면 이 설정을 지워 주세요.)
 const THINKING_BUDGET = process.env.GEMINI_THINKING_BUDGET;
 const RATE_LIMIT = Number(process.env.RATE_LIMIT) || 600; // IP 하나당 30분에 허용하는 요청 수
 // 기본 모델이 바쁘거나(503) 한도에 걸리면(429) 이 예비 모델이 자동으로 대신 대답해요.
-const MODEL_FALLBACK = process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-lite-latest';
+// 예비 모델은 gemini-3.8-flash예요. (무료 한도: 분당 5번, 하루 20번이라 잠깐 도와주는 용도)
+const MODEL_FALLBACK = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash';
 
 // ───────── 질문 구조 ─────────
 // 정해진 구조: 정보 3, 후속 1, 생각·느낌 1, 포부 1, 당부 1 = 질문 7번
